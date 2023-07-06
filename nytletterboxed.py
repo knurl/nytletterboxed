@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 
-import os, sys, pdb, argparse, re, string
-from random import sample
+import os, sys, pdb, argparse, re, string, random
 from functools import reduce
 
-def process_word(sides, word):
+num_letters = 12
+
+def process_word(letters, word):
+    sides = [frozenset(letters[i:i+3]) for i in range(0, len(letters), 3)]
     all_letters = sides[0]|sides[1]|sides[2]|sides[3]
     wl = len(word)
     next_sides_graph = {None: [sides[0], sides[1], sides[2], sides[3]],
@@ -35,73 +37,23 @@ def process_word(sides, word):
     else:
         return None
 
-def printbox(sides):
-    top = ' '.join(sides[0])
-    toplen = len(top)
-    left = list(sides[1])
-    right = list(sides[2])
-    print('\n ' + top)
-    box = []
-    box.append('+' + '-' * (toplen - 2) + '+')
-    box.append('|' + ' ' * (toplen - 2) + '|')
-    box.append(box[0])
-    for i in range(0,3):
-        print(left[i] + box[i] + right[i])
-    print(' ' + ' '.join(sides[3]) + '\n')
-
-def main():
-    num_letters = 12
-    rxp = f'^[a-zA-Z]{{{num_letters}}}$'
-    #
-    # Process command-line arguments
-    #
-    p = argparse.ArgumentParser(description=
-                                'Find NYT LetterBoxed solutions. Valid '
-                                'solutions are two words, wherein the second '
-                                'word begins with the last letter of the '
-                                'first.')
-    # Required arguments
-    p.add_argument('word_list', type=argparse.FileType('r'),
-                   help="Path to your English dictionary. Needs to be a "
-                   "plaintext list of words, separated by newlines. Doesn't "
-                   "have to be sorted.")
-    p.add_argument('-l', '--letters', type=str, action='store',
-                   help="The allowed letters, in clockwise order, e.g.: "
-                   "tnlihawrudof. If you don't specify this option, a random"
-                   "set of letters will be selected.")
-    ns = p.parse_args()
-
-    letters = ''
-    if ns.letters:
-        if not re.search(rxp, ns.letters):
-            sys.exit('Letters are not in correct format. See example.')
-        letters = ns.letters.lower()
-        print(f"Using user-provided letters '{letters}'")
-    else:
-        alphabet = string.ascii_lowercase[:26]
-        letters = sample(alphabet, num_letters) # no replacement
-        letterstr = ''.join(letters)
-        print(f"Using randomly-generated letters '{letterstr}'")
-
-    sides = [frozenset(letters[i:i+3]) for i in range(0, len(letters), 3)]
-    printbox(sides)
+def solve_puzzle(word_list, letters):
+    global num_letters
+    assert len(letters) == num_letters
 
     # Read each dictionary word out, and filter out the ones that are valid for
     # the sides given
+    word_list.seek(0)
     valid_words = []
     try:
-        for word in ns.word_list:
-            t = process_word(sides, word.rstrip('\n'))
+        for word in word_list:
+            t = process_word(letters, word.rstrip('\n'))
             if t:
                 valid_words.append(t)
     except (BrokenPipeError, IOError) as e:
         print(e, file=sys.stderr)
         sys.stderr.close()
-
-    vwlen = len(valid_words)
-    print(f'{vwlen} valid words found.', file=sys.stderr)
-    if vwlen < 1:
-        sys.exit(-1)
+        sys.exit(0)
 
     # Build up a list of words indexed by first letter
     words_by_eff = sorted(valid_words, key=lambda tup: tup[0], reverse=True)
@@ -123,15 +75,90 @@ def main():
             if len(letters1|letters2) >= num_letters:
                 score = len(word1)+len(word2)
                 word_pairs.append(f'{word1} {word2}')
-    sorted_word_pairs = sorted(word_pairs, key=lambda s: len(s))
-    swplen = len(sorted_word_pairs)
-    print(f'{swplen} valid two-word pairs found.', file=sys.stderr)
-    if swplen < 1:
-        print("Try again!\nThis random combination of letters wouldn't "
-              "Appear in a NYT Letter Boxed puzzle")
-        sys.exit(-1)
-    for pair in sorted_word_pairs:
-        print(pair)
+    return sorted(word_pairs, key=lambda s: len(s))
+
+def printbox(letters):
+    top = ' '.join(letters[:3])
+    right = letters[3:6]
+    bot = ' '.join(letters[6:9])
+    left = letters[9:]
+
+    toplen = len(top)
+
+    # top row
+    print('\n ' + top)
+
+    # middle rows
+    box = []
+    box.append('+' + '-' * (toplen - 2) + '+')
+    box.append('|' + ' ' * (toplen - 2) + '|')
+    box.append(box[0])
+    for i in range(0,3):
+        print(left[i] + box[i] + right[i])
+
+    print(' ' + bot + '\n')
+
+def main():
+    global num_letters
+    rxp = f'^[a-zA-Z]{{{num_letters}}}$'
+
+    vowels = 'aeiou'
+    consonants = 'bcdfghjklmnpqrstvwxyz'
+
+    #
+    # Process command-line arguments
+    #
+    p = argparse.ArgumentParser(description=
+                                'Find NYT LetterBoxed solutions. Valid '
+                                'solutions are two words, wherein the second '
+                                'word begins with the last letter of the '
+                                'first.')
+    # Required arguments
+    p.add_argument('word_list', type=argparse.FileType('r'),
+                   help="Path to your English dictionary. Needs to be a "
+                   "plaintext list of words, separated by newlines. Doesn't "
+                   "have to be sorted.")
+    p.add_argument('-l', '--letters', type=str, action='store',
+                   default=None,
+                   help="The allowed letters, in clockwise order, e.g.: "
+                   "tnlihawrudof. If you don't specify this option, a random"
+                   "set of letters will be selected.")
+    ns = p.parse_args()
+
+    letters = ns.letters
+    word_pairs = []
+
+    if letters:
+        if not re.search(rxp, ns.letters):
+            sys.exit('Letters are not in correct format. See example.')
+        letters = ns.letters.lower()
+        print(f"Using user-provided letters '{letters}'")
+        word_pairs = solve_puzzle(ns.word_list, letters)
+        if not word_pairs:
+            print(f'Could not find solution using those letters!')
+
+    if not word_pairs:
+        print('Attempting to generate a new puzzle', end='', flush=True)
+
+    while not word_pairs:
+        print('.', end='', flush=True)
+        nvowels = random.randrange(2, 4)
+        vowel_list = random.sample(vowels, nvowels)
+        cons_list = random.sample(consonants, num_letters - nvowels)
+        if 'q' in cons_list and 'u' not in vowel_list:
+            vowel_list = ['u'] + vowel_list
+        letter_list = (vowel_list + cons_list)[:12]
+        random.shuffle(letter_list)
+        letters = ''.join(letter_list)
+        assert(len(letters) == num_letters)
+        word_pairs = solve_puzzle(ns.word_list, letters)
+
+    printbox(letters)
+    if word_pairs:
+        print("Solutions are:")
+        print('\n'.join(word_pairs[:5]))
+    else:
+        print("No solutions found!")
 
 if __name__ == '__main__':
     main()
